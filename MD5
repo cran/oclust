@@ -1,0 +1,9 @@
+e91a6fb0a2b18e1fdcc9e28fae0618fe *DESCRIPTION
+9b73ca9aeb62823f4e2fdd93a24c6341 *NAMESPACE
+b26ee403c7d929e9ec83e56263f2b2b9 *R/Rfunctions.R
+774d74c68d635b88dd8d5fd9fcff8a4b *man/MixBetaDens.Rd
+9740e162d79c7870767eb509eb6ce705 *man/oclust.Rd
+e85ad14866bf1b84dd2593fbafaa6444 *man/plot.oclust.Rd
+43d75f6983adc6fdb02f8aadedde10df *man/print.oclust.Rd
+544574c99fa8472a6ff373e5733e0fe4 *man/print.summary.oclust.Rd
+382ce13b09ad28e902eda08a606def9d *man/summary.oclust.Rd

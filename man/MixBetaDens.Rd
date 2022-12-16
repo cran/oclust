@@ -4,8 +4,15 @@
 \alias{MixBetaDens}
 \title{Mixture of Beta Functions}
 \usage{
-MixBetaDens(n, p, x = seq(0, 15, by = 0.01), a = 0, b = 1,
-  n_g = n_g, var = var)
+MixBetaDens(
+  n,
+  p,
+  x = seq(0, 15, by = 0.01),
+  a = 0,
+  b = 1,
+  n_g = n_g,
+  var = var
+)
 }
 \arguments{
 \item{n}{The number of observations in the dataset}
@@ -18,9 +25,9 @@ MixBetaDens(n, p, x = seq(0, 15, by = 0.01), a = 0, b = 1,
 
 \item{b}{Upper bound for area evaluation. Default value is 1}
 
-\item{n_g}{Vector decribing the number of observations in each cluster}
+\item{n_g}{Vector describing the number of observations in each cluster}
 
-\item{var}{An array of variances, one slice for each cluster}
+\item{var}{A list of cluster variance matrices}
 }
 \value{
 MixBetaDens returns a list with

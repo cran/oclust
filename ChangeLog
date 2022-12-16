@@ -1,0 +1,11 @@
+oclust version 0.2.0 2022-12-15:
+
+- Added option to scale data first
+- Changed EM algorithm implementation from mclust to mixture
+- Changed initialization of EM algorithm to hierarchical clustering
+- Allowed control over maximum number of iterations for the EM algorithm
+- Now initialize subset models with classification from full model
+- Added function to identify gross outliers
+- Added ability to remove gross outliers before running oclust
+- Added a function to simulate uniform outliers
+- Added Kuiper test to stop oclust algorithm early once p-value surpasses threshold

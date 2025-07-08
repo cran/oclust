@@ -1,3 +1,11 @@
+oclust version 1.0.0 2025-07-04:
+
+- Fixed error when variables exceeded observations
+- No longer allows parsimonious model to change
+- Added progress bar
+- Fixed parallelization on Windows
+- Maintainer changed
+
 oclust version 0.2.0 2022-12-15:
 
 - Added option to scale data first

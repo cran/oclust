@@ -67,26 +67,28 @@ Gross outlier indices can be found with the \code{\link{findGrossOuts}} function
 N. H. Kuiper, Tests concerning random points on a circle, in: Nederl. Akad. Wetensch. Proc. Ser. A, Vol. 63, 1960, pp. 38–47.
 }
 \examples{
-\dontrun{
-#simulate 4D dataset
+# simulate 4D dataset
 library(mvtnorm)
 set.seed(123)
-data<-rbind(rmvnorm(250,rep(-3,4),diag(4)),
-           rmvnorm(250,rep(3,4),diag(4)))
-#add outliers
-noisy<-simOuts(data=data,alpha=0.02,seed=123)
+data <- rbind(rmvnorm(250, rep(-3, 4), diag(4)),
+              rmvnorm(250, rep(3, 4), diag(4)))
+# add outliers
+noisy <- simOuts(data = data, alpha = 0.02, seed = 123)
 
-#Find gross outliers
-findGrossOuts(X=noisy,minPts=10)
+# Find gross outliers
+findGrossOuts(X = noisy, minPts = 10)
 
-#Elbow between 5 and 10. Specify limits of graph
-findGrossOuts(X=noisy,minPts=10,xlim=c(5,10))
+# Elbow between 5 and 10. Specify limits of graph
+findGrossOuts(X = noisy, minPts = 10, xlim = c(5, 10))
 
-#Elbow at 9
-gross<-findGrossOuts(X=noisy,minPts=10,elbow=9)
+# Elbow at 9
+gross <- findGrossOuts(X = noisy, minPts = 10, elbow = 9)
 
-#run algorithm
-result<-oclust(X=noisy,maxO=15,G=2,grossOuts = gross,
-modelNames = "EEE",mc.cores=1,nmax=50,kuiper=FALSE,
-verb=TRUE,scale=TRUE)
-}}
+# run algorithm
+if (interactive()) {
+# This example takes a few minutes to run
+  result <- oclust(X = noisy, maxO = 15, G = 2, grossOuts = gross,
+                  modelNames = "EEE", mc.cores = 1, nmax = 50,
+                  kuiper = FALSE, verb = TRUE, scale = TRUE)
+}
+}

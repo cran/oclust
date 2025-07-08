@@ -29,9 +29,10 @@
 #' @importFrom utils flush.console menu
 #' @importFrom entropy KL.plugin
 #' @importFrom MASS ginv
-#' @importFrom mclust plot.mclustBIC mclust1Dplot mclust2Dplot coordProj
+#' @importFrom mclust plot.mclustBIC mclust1Dplot mclust2Dplot coordProj Mclust emControl priorControl
 #' @importFrom mixture gpcm
 #' @importFrom mvtnorm rmvnorm
+#' @importFrom progress progress_bar
 #'
 #' @export
 MixBetaDens<-function(n,p,x =seq(0, 15, by=0.01),a=0,b=1,n_g=n_g,var=var){
@@ -282,6 +283,11 @@ findGrossOuts<-function(X,minPts=10,xlim=NULL,elbow=NULL){
   nO=length(grossOuts)
   ninitO=nO
 
+  if(prnt){
+    total <- maxO+1
+    pb <- progress_bar$new(format = "[:bar] :current/:total (:percent)", total = total,clear=FALSE)
+    pb$tick(nO)
+  }
 
   # We reset the number of cores to use
   if((n-nO)<mc.cores) mc.cores = n-nO
@@ -296,13 +302,19 @@ findGrossOuts<-function(X,minPts=10,xlim=NULL,elbow=NULL){
   # Parallel estimations
   #
 
-  if(mc.cores>1 && Sys.info()[['sysname']] == 'Windows'){
-    cl = parallel::makeCluster(mc.cores)
-    loadMyPackages = function(x){
-      # we load the package
-      library(oclust)
+  if (mc.cores > 1 && Sys.info()[['sysname']] == 'Windows') {
+    cl <- parallel::makeCluster(mc.cores)
+    .likes.j.wrapper <- function(i) {
+      .likes.j(i, x = newX, G = G, z = z, modelNames = modelNames, nmax = nmax)
     }
-    par.setup = parallel::parLapply(cl, 1:length(cl), loadMyPackages)
+    # Load necessary packages on each worker
+    parallel::clusterEvalQ(cl, {
+      library(oclust)
+    })
+
+    #export variables for later
+    parallel::clusterExport(cl, varlist = c("G", "modelNames", "nmax"
+    ), envir = environment())
   }
 
   indsLeft<-1:nrow(X)
@@ -325,10 +337,6 @@ findGrossOuts<-function(X,minPts=10,xlim=NULL,elbow=NULL){
   minKL=Inf
 
   while(nO<=maxO && maxpval<P){
-    if(prnt){
-      message("\n","o=",nO,"\n")
-      flush.console()
-    }
     dist_mat <- dist(newX, method = 'euclidean')
     hclust_X <- hclust(dist_mat, method = 'ward.D2')
     class<-cutree(hclust_X, k = G)
@@ -337,21 +345,47 @@ findGrossOuts<-function(X,minPts=10,xlim=NULL,elbow=NULL){
     for (k in 1:G){
       z[class==k,k]=1
     }
+    if (min(table(class))<p+1) z=NULL
     mixtry=NULL
-    try(mixtry<-mixture::gpcm(newX,G=G,start=z,mnames = modelNames,nmax=nmax))
-    if(is.null(mixtry))try(mixtry<-mixture::gpcm(newX,G=G,start=z,nmax=nmax))
-    if(is.null(mixtry))(mixtry<-mixture::gpcm(newX,G=G,start=2,nmax=nmax))
-    like0=mixtry$best_model$loglik
-    sigs=mixtry$best_model$model_obj[[1]]$sigs
-    n_gs=as.vector(table(mixtry$map))
-    pi_gs=mixtry$best_model$model_obj[[1]]$pi_gs
-    z=mixtry$z
+    modfitted=FALSE
+    attempt=0
+    while(modfitted==FALSE && attempt<5){
+      attempt=attempt+1
+      if (attempt==1){try(mixtry<-mixture::gpcm(newX,G=G,start=z,mnames = modelNames,nmax=nmax),silent=TRUE)}
+      if (attempt==2){try(mixtry<-mixture::gpcm(newX,G=G,start=z,mnames = modelNames,veo=TRUE,nmax=nmax),silent=TRUE)}
+      if (attempt==3){try(mixtry<-mixture::gpcm(newX,G=G,start=2,mnames = modelNames,veo=TRUE,nmax=nmax),silent=TRUE)}
+      if (attempt==4){try(mixtry<-mclust::Mclust(data=newX,G=G,modelNames = modelNames,control=emControl(itmax=nmax),verbose = FALSE),silent=TRUE)}
+      if (attempt==5){try(mixtry<-mclust::Mclust(data=newX,G=G,modelNames = modelNames,prior=priorControl(),control=emControl(itmax=nmax),verbose = FALSE),silent=TRUE)}
+      modfitted=!is.null(mixtry)
+    }
+    if (is.null(mixtry)) {
+      message("\nCould not fit model with ", nO, " outliers. Ending OCLUST early.")
+      break
+    }
+
+    if(attempt<=3){
+      like0=mixtry$best_model$loglik
+      sigs=mixtry$best_model$model_obj[[1]]$sigs
+      n_gs=as.vector(table(mixtry$map))
+      pi_gs=mixtry$best_model$model_obj[[1]]$pi_gs
+      z=mixtry$z
+    }else{
+      like0=mixtry$loglik
+      sigs=lapply(1:G,function(g)mixtry$parameters$variance$sigma[,,g])
+      n_gs=as.vector(table(mixtry$classification))
+      pi_gs=matrix(mixtry$parameters$pro,1,G)
+      z=mixtry$z
+      }
+
+
     # compute the subset log-likelihoods
     if(mc.cores==1){
       liks<-unlist(lapply(X=1:nrow(newX), FUN=.likes.j, x=newX, G=G,z=z,modelNames=modelNames,nmax=nmax))
     } else if(Sys.info()[['sysname']] == 'Windows'){
+      parallel::clusterExport(cl, varlist = c( "newX", "z"
+      ), envir = environment())
       liks = NULL
-      try(liks <- unlist(parallel::parLapply(cl, X=1:nrow(newX), .likes.j, x=newX, G=G,z=z,modelNames=modelNames,nmax=nmax)))
+      try(liks <- unlist(parallel::parLapply(cl, X = 1:nrow(newX), fun = .likes.j.wrapper)))
       if(is.null(liks)) {parallel::stopCluster(cl);
         stop("Unknown error in the parallel computing. Try mc.cores=1 to detect the problem.")}
     } else {
@@ -369,7 +403,7 @@ findGrossOuts<-function(X,minPts=10,xlim=NULL,elbow=NULL){
     if(!is.null(KL[i])&&!is.na(KL[i])&&KL[i]<minKL){finalModel=mixtry; minKL=KL[i]; numO=nO}
     if(kuiper&&!is.null(pval[i])&&!is.na(pval[i])&&pval[i]>P){finalModel=mixtry; maxpval=pval[i]; numO=nO}
     if(kuiper&&!is.null(pval[i])&&!is.na(pval[i])&&pval[i]>maxpval){maxpval=pval[i]}
-
+    if (prnt) pb$tick(1)
     nO=nO+1
     i=i+1
   }
@@ -422,27 +456,30 @@ findGrossOuts<-function(X,minPts=10,xlim=NULL,elbow=NULL){
 #' \item{allCand}{All outlier candidates in order of likelihood}
 
 #' @examples
-#'#simulate 4D dataset
-#'library(mvtnorm)
-#'set.seed(123)
-#'data<-rbind(rmvnorm(250,rep(-3,4),diag(4)),
-#'            rmvnorm(250,rep(3,4),diag(4)))
-#'#add outliers
-#'noisy<-simOuts(data=data,alpha=0.02,seed=123)
+#' # simulate 4D dataset
+#' library(mvtnorm)
+#' set.seed(123)
+#' data <- rbind(rmvnorm(250, rep(-3, 4), diag(4)),
+#'               rmvnorm(250, rep(3, 4), diag(4)))
+#' # add outliers
+#' noisy <- simOuts(data = data, alpha = 0.02, seed = 123)
 #'
-#'#Find gross outliers
-#'findGrossOuts(X=noisy,minPts=10)
+#' # Find gross outliers
+#' findGrossOuts(X = noisy, minPts = 10)
 #'
-#'#Elbow between 5 and 10. Specify limits of graph
-#'findGrossOuts(X=noisy,minPts=10,xlim=c(5,10))
+#' # Elbow between 5 and 10. Specify limits of graph
+#' findGrossOuts(X = noisy, minPts = 10, xlim = c(5, 10))
 #'
-#'#Elbow at 9
-#'gross<-findGrossOuts(X=noisy,minPts=10,elbow=9)
+#' # Elbow at 9
+#' gross <- findGrossOuts(X = noisy, minPts = 10, elbow = 9)
 #'
-#'#run algorithm
-#'result<-oclust(X=noisy,maxO=15,G=2,grossOuts = gross,modelNames = "EEE",
-#'        mc.cores=1,nmax=50,kuiper=FALSE,verb=TRUE,scale=TRUE)
-#
+#' # run algorithm
+#' if (interactive()) {
+#' # This example takes a few minutes to run
+#'   result <- oclust(X = noisy, maxO = 15, G = 2, grossOuts = gross,
+#'                   modelNames = "EEE", mc.cores = 1, nmax = 50,
+#'                   kuiper = FALSE, verb = TRUE, scale = TRUE)
+#' }
 #'@export
 #'
 oclust<-function(X,maxO,G,grossOuts=NULL,modelNames="VVV",mc.cores=1,nmax=1000,kuiper=FALSE, pval=0.05, B=100,verb=FALSE,scale=TRUE){
@@ -451,6 +488,7 @@ oclust<-function(X,maxO,G,grossOuts=NULL,modelNames="VVV",mc.cores=1,nmax=1000,k
   if(scale==TRUE){X=scale(X)} else{X=scale(X,center = F,scale = F)}
   p=ncol(X)
   n=nrow(X)
+  options(warn=1)
   is.int <- function(no){abs(no-round(no))<1e-15}
   if(!is.numeric(G)||!is.numeric(mc.cores)||!is.numeric(nmax)||!is.numeric(maxO)||!is.numeric(B)) stop("G, B, nmax, maxO and mc.cores must numeric");
   if(!is.int(G)||!is.int(mc.cores)||G<1||mc.cores<1||!is.int(nmax)||nmax<1||!is.int(B)||B<1) stop("G, B, nmax and mc.cores must be positive integers");
@@ -465,6 +503,10 @@ oclust<-function(X,maxO,G,grossOuts=NULL,modelNames="VVV",mc.cores=1,nmax=1000,k
   if(!is.null(modelNames) && sum(!(modelNames %in% c("EII","VII","EEI","VEI","EVI","VVI","EEE","VEE","EVE","EEV","VVE","VEV","EVV","VVV")))) stop("modelNames must be NULL or at least one of 'EII','VII','EEI','VEI','EVI','VVI','EEE','VEE','EVE','EEV','VVE','VEV','EVV','VVV'")
   if(!is.logical(verb)||!is.logical(scale)) stop("verb and scale must be logical: TRUE or FALSE");
   if(kuiper==TRUE && !(0<pval && pval<=1)) stop("pval must be between 0 and 1");
+  if(n-maxO<G*(p+1)) stop("Specified maxO is too large")
+  if(maxO/n>0.5){
+    warningmsg<-("Maximum outliers are more than 50%. Consider reducing maxO")
+    warning(warningmsg)}
   m<-.oLikes(X=X,maxO=maxO,G=G,B=B,grossOuts=grossOuts,kuiper=kuiper,pval=pval,modelNames = modelNames,mc.cores=mc.cores,nmax=nmax,prnt=verb)
 
   numO<-as.numeric(m$numO)
@@ -486,10 +528,20 @@ oclust<-function(X,maxO,G,grossOuts=NULL,modelNames="VVV",mc.cores=1,nmax=1000,k
 
 .likes.j<-function(j,x,G,z,modelNames,nmax){
   w=NULL
-  try(w<-mixture::gpcm(x[-j,],G=G,mnames=modelNames,start=z[-j,],nmax = nmax)$best_model$loglik)
-  if(is.null(w))try(w<-mixture::gpcm(x[-j,],G=G,start=z[-j,],nmax=nmax)$best_model$loglik)
-  if(is.null(w))try(w<-mixture::gpcm(x[-j,],G=G,start=2,nmax=nmax)$best_model$loglik)
-  if(is.null(w))w<-NA
+  p=ncol(x)
+  if (min(colSums(z))<p+1) z=NULL
+  modfitted=FALSE
+  attempt=0
+  while(modfitted==FALSE && attempt<5){
+    attempt=attempt+1
+    if (attempt==1){try(w<-mixture::gpcm(x[-j,],G=G,mnames=modelNames,start=z[-j,],nmax = nmax)$best_model$loglik,silent=TRUE)}
+    if (attempt==2){try(w<-mixture::gpcm(x[-j,],G=G,mnames=modelNames,start=z[-j,],veo=TRUE,nmax = nmax)$best_model$loglik,silent=TRUE)}
+    if (attempt==3){try(w<-mixture::gpcm(x[-j,],G=G,mnames=modelNames,start=2,veo=TRUE,nmax = nmax)$best_model$loglik,silent=TRUE)}
+    if (attempt==4){try(w<-mclust::Mclust(data=x[-j,],G=G,modelNames = modelNames,control=emControl(itmax=nmax),verbose = FALSE)$loglik,silent=TRUE)}
+    if (attempt==5){try(w<-mclust::Mclust(data=x[-j,],G=G,modelNames = modelNames,prior=priorControl(),control=emControl(itmax=nmax),verbose = FALSE)$loglik,silent=TRUE)}
+    modfitted=!is.null(w)
+  }
+  if(!modfitted) w<-NA
   return(w)
 }
 
@@ -738,6 +790,8 @@ plot.oclust <- function(x,
 
   invisible()
 }
+
+
 
 #' @importFrom("graphics", "axis", "box", "hist", "par", "plot", "text")
 #' @importFrom("stats", "dbeta", "pbeta")
